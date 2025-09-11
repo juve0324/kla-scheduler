@@ -313,34 +313,27 @@ function renderDays(skipFetch){
         tbody.appendChild(tr);
       });
     });
-    tbody.querySelectorAll(".btn-clear").forEach(btn=>{
-      btn.addEventListener("click", async (e)=>{
-        const d=e.currentTarget.getAttribute("data-day");
-        const s=e.currentTarget.getAttribute("data-slot");
-        const iso=weekKey(selectedWeekStart);
-        const passVal = $("adminPass").value || "";
-        if (!passVal) { alert("Enter admin password first."); return; }
-        if (!confirm(`Clear booking for ${d} • ${s}?`)) return;
-        try {
-          const resp = await fetch("/.netlify/functions/clear-slot", {
-            method: "POST",
-            headers: { "Content-Type": "application/json", "x-admin-pass": passVal },
-            body: JSON.stringify({ week_iso: iso, day: d, slot: s })
-          });
-          if (resp.ok) {
-            await fetchWeekBookings(); renderDays(true);
-            alert("Cleared.");
-          } else {
-            const text = await resp.text();
-            alert("Failed to clear: " + text);
-          }
-        } catch (err) {
-          alert("Network error: " + err);
-        }
+// NEW handler — keep this
+tbody.querySelectorAll(".btn-clear").forEach(btn=>{
+  btn.addEventListener("click", async (e)=>{
+    const d = e.currentTarget.getAttribute("data-day");
+    const s = e.currentTarget.getAttribute("data-slot");
+    const iso = weekKey(selectedWeekStart);
+    const passVal = $("adminPass").value || "";
+    if (!passVal) { alert("Enter admin password first."); return; }
+    if (!confirm(`Clear booking for ${d} • ${s}?`)) return;
+    try {
+      const resp = await fetch("/.netlify/functions/clear-slot", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-admin-pass": passVal },
+        body: JSON.stringify({ week_iso: iso, day: d, slot: s })
       });
-    });
-    });
-  }
+      if (resp.ok) { await fetchWeekBookings(); renderDays(true); alert("Cleared."); }
+      else { alert("Failed to clear: " + (await resp.text())); }
+    } catch (err) { alert("Network error: " + err); }
+  });
+});
+
 
   if (skipFetch) { draw(); return; }
   fetchWeekBookings().then(draw);
