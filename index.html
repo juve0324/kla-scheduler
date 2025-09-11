@@ -273,71 +273,100 @@ function bindRealtime(){
 }
 
 function renderDays(skipFetch){
-  const row=$("daysRow"); row.innerHTML="";
-  const currentISO=weekKey(selectedWeekStart);
-  $("wkISO").textContent=currentISO;
+  const row = $("daysRow");
+  row.innerHTML = "";
+
+  const currentISO = weekKey(selectedWeekStart);
+  const wkIsoEl = $("wkISO");
+  if (wkIsoEl) wkIsoEl.textContent = currentISO; // safe if admin panel not mounted
 
   function draw(){
-    ["Tue","Thu","Fri"].forEach(day=>{
-      const card=document.createElement("div"); card.className="card";
-      const h=document.createElement("h2"); h.textContent=day; h.style.margin="0 0 12px"; h.style.fontSize="20px";
+    const days = ["Tue","Thu","Fri"];
+
+    // Day cards & slots
+    days.forEach(day => {
+      const card = document.createElement("div");
+      card.className = "card";
+
+      const h = document.createElement("h2");
+      h.textContent = day;
+      h.style.margin = "0 0 12px";
+      h.style.fontSize = "20px";
       card.appendChild(h);
-      RAW_SLOTS[day].forEach(slot=>{
-        const booked=weekBookings.some(b=>b.day===day && b.slot===slot);
-        const past=isSlotInPast(selectedWeekStart,day,slot);
-        const btn=document.createElement("button"); btn.className="btn slot";
-        btn.disabled=booked || past;
-        btn.innerHTML=`<div class="flex" style="justify-content:space-between;width:100%;">
+
+      (RAW_SLOTS[day] || []).forEach(slot => {
+        const booked = weekBookings.some(b => b.day === day && b.slot === slot);
+        const past   = isSlotInPast(selectedWeekStart, day, slot);
+
+        const btn = document.createElement("button");
+        btn.className = "btn slot";
+        btn.disabled = booked || past;
+        btn.innerHTML = `<div class="flex" style="justify-content:space-between;width:100%;">
           <span style="font-weight:600;">${slot}</span>
-          ${booked?'<span class="tag gray">Booked</span>':past?'<span class="tag muted">Past</span>':'<span class="muted">Select</span>'}
+          ${booked ? '<span class="tag gray">Booked</span>' : (past ? '<span class="tag muted">Past</span>' : '<span class="muted">Select</span>')}
         </div>`;
-        btn.onclick=()=>{
-          selected={day,slot};
+        btn.onclick = () => {
+          selected = { day, slot };
           $("formCard").classList.remove("hidden");
-          $("selSummary").textContent=`Week: ${fmtDate(selectedWeekStart)} (Mon) — ${fmtDate(addDays(selectedWeekStart,6))} (Sun) • Day: ${day} • Time: ${slot}`;
-          $("nameInp").value=""; $("emailInp").value=""; $("statusSpan").textContent=""; $("icsLink").classList.add("hidden");
+          $("selSummary").textContent =
+            `Week: ${fmtDate(selectedWeekStart)} (Mon) — ${fmtDate(addDays(selectedWeekStart,6))} (Sun) • Day: ${day} • Time: ${slot}`;
+          $("nameInp").value = "";
+          $("emailInp").value = "";
+          $("statusSpan").textContent = "";
+          $("icsLink").classList.add("hidden");
         };
         card.appendChild(btn);
       });
+
       row.appendChild(card);
     });
 
     // Admin table
-    const tbody=$("adminTbody"); tbody.innerHTML="";
-    ["Tue","Thu","Fri"].forEach(day=>{
-      RAW_SLOTS[day].forEach(slot=>{
-        const info=weekBookings.find(b=>b.day===day && b.slot===slot);
-        const tr=document.createElement("tr");
-        tr.innerHTML=`<td>${day}</td><td>${slot}</td><td>${info?info.name:"—"}</td><td>${info?info.email:"—"}</td>
-          <td>${info?'<button class="btn danger btn-clear" data-day="'+day+'" data-slot="'+slot+'">Clear</button>':'<span class="muted">—</span>'}</td>`;
-        tbody.appendChild(tr);
+    const tbody = $("adminTbody");
+    if (tbody){
+      tbody.innerHTML = "";
+      ["Tue","Thu","Fri"].forEach(day=>{
+        (RAW_SLOTS[day] || []).forEach(slot=>{
+          const info = weekBookings.find(b => b.day === day && b.slot === slot);
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td>${day}</td>
+            <td>${slot}</td>
+            <td>${info ? info.name : "—"}</td>
+            <td>${info ? info.email : "—"}</td>
+            <td>${info ? '<button class="btn danger btn-clear" data-day="'+day+'" data-slot="'+slot+'">Clear</button>' : '<span class="muted">—</span>'}</td>`;
+          tbody.appendChild(tr);
+        });
       });
-    });
-// NEW handler — keep this
-tbody.querySelectorAll(".btn-clear").forEach(btn=>{
-  btn.addEventListener("click", async (e)=>{
-    const d = e.currentTarget.getAttribute("data-day");
-    const s = e.currentTarget.getAttribute("data-slot");
-    const iso = weekKey(selectedWeekStart);
-    const passVal = $("adminPass").value || "";
-    if (!passVal) { alert("Enter admin password first."); return; }
-    if (!confirm(`Clear booking for ${d} • ${s}?`)) return;
-    try {
-      const resp = await fetch("/.netlify/functions/clear-slot", {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "x-admin-pass": passVal },
-        body: JSON.stringify({ week_iso: iso, day: d, slot: s })
+
+      // SINGLE per-slot clear handler (server function)
+      tbody.querySelectorAll(".btn-clear").forEach(btn=>{
+        btn.addEventListener("click", async (e)=>{
+          const d = e.currentTarget.getAttribute("data-day");
+          const s = e.currentTarget.getAttribute("data-slot");
+          const iso = weekKey(selectedWeekStart);
+          const passVal = $("adminPass").value || "";
+          if (!passVal){ alert("Enter admin password first."); return; }
+          if (!confirm(`Clear booking for ${d} • ${s}?`)) return;
+
+          try{
+            const resp = await fetch("/.netlify/functions/clear-slot", {
+              method: "POST",
+              headers: { "Content-Type": "application/json", "x-admin-pass": passVal },
+              body: JSON.stringify({ week_iso: iso, day: d, slot: s })
+            });
+            if (resp.ok){ await fetchWeekBookings(); renderDays(true); alert("Cleared."); }
+            else { alert("Failed to clear: " + (await resp.text())); }
+          }catch(err){ alert("Network error: " + err); }
+        });
       });
-      if (resp.ok) { await fetchWeekBookings(); renderDays(true); alert("Cleared."); }
-      else { alert("Failed to clear: " + (await resp.text())); }
-    } catch (err) { alert("Network error: " + err); }
-  });
-});
+    }
+  }
 
-
-  if (skipFetch) { draw(); return; }
+  if (skipFetch){ draw(); return; }
   fetchWeekBookings().then(draw);
 }
+
 
 // ======= ACTIONS =======
 $("weekSel").addEventListener("change",(e)=>{
