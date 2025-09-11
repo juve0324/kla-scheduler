@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CMU — Korean Language Assistant Scheduler</title>
+  <meta name="description" content="CMU Korean Language Assistant — appointment scheduler" />
+  <style>
+    :root{
+      --bg:#f8fafc; --panel:#fff; --text:#0f172a; --muted:#64748b; --border:#e2e8f0; --accent:#0f172a;
+      --ok:#16a34a; --warn:#ca8a04; --danger:#b91c1c;
+    }
+    html,body{height:100%;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;}
+    .container{max-width:960px;margin:0 auto;padding:40px 24px;}
+    h1{font-size:28px;margin:0 0 8px;}
+    p.lead{color:var(--muted);margin:0 0 24px;}
+    .row{display:grid;grid-template-columns:1fr;gap:24px;}
+    @media(min-width:900px){.row{grid-template-columns:repeat(3,1fr);}}
+    .card{background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:16px;box-shadow:0 1px 2px rgba(0,0,0,.04);}
+    .btn{display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--border);background:#fff;border-radius:12px;padding:8px 12px;cursor:pointer;transition:.15s;}
+    .btn:hover{background:#f8fafc;border-color:#cbd5e1;}
+    .btn.primary{background:var(--accent);color:#fff;border-color:var(--accent);}
+    .btn.primary:hover{opacity:.9;}
+    .btn.danger{border-color:#fecaca;background:#fff;color:var(--danger);}
+    .btn:disabled{background:#f1f5f9;color:#94a3b8;border-color:#e2e8f0;cursor:not-allowed;}
+    .slot{width:100%;text-align:left;margin-bottom:8px;}
+    .tag{font-size:12px;border-radius:999px;padding:2px 8px;}
+    .tag.gray{background:#e2e8f0;color:#334155;font-weight:600;}
+    .tag.muted{color:#94a3b8;}
+    label{display:block;font-size:14px;color:#334155;margin:6px 0;}
+    input,select{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:12px;background:#fff;outline:none;}
+    input:focus,select:focus{border-color:#94a3b8;box-shadow:0 0 0 2px rgba(148,163,184,.25);}
+    table{width:100%;border-collapse:collapse;}
+    th,td{padding:10px 12px;border-bottom:1px solid var(--border);text-align:left;font-size:14px;}
+    .muted{color:#64748b;}
+    footer{margin-top:24px;color:#94a3b8;font-size:12px;text-align:center;}
+    .row2{display:grid;grid-template-columns:1fr;gap:16px;}
+    @media(min-width:700px){.row2{grid-template-columns:repeat(2,1fr);}}
+    .status{font-size:14px;color:#334155;margin-left:6px;}
+    .hidden{display:none;}
+    .flex{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+    .badge{display:inline-block;border-radius:8px;padding:2px 8px;border:1px solid var(--border);font-size:12px;color:#334155;}
+  </style>
+
+  <!-- EmailJS (client-side email for student confirmations) -->
+  <script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@3/dist/email.min.js"></script>
+  <script>
+    // ======== EMAILJS CONFIG — REPLACE WITH YOUR REAL VALUES ========
+    const EMAILJS_PUBLIC_KEY = "Se68LspwgpeAuDn6u";
+    const EMAILJS_SERVICE_ID = "cmukorean";
+    const EMAILJS_TEMPLATE_ID = "template_yokkhiv";
+    // ======== END EMAILJS CONFIG ========
+
+    document.addEventListener('DOMContentLoaded', function(){
+      if (window.emailjs && EMAILJS_PUBLIC_KEY && !/YOUR_EMAILJS_PUBLIC_KEY/.test(EMAILJS_PUBLIC_KEY)) {
+        emailjs.init(EMAILJS_PUBLIC_KEY);
+      }
+    });
+  </script>
+
+  <!-- Supabase browser SDK (UMD build so no bundler is required) -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+  <div class="container">
+    <div class="flex" style="justify-content:space-between;align-items:center;margin-bottom:8px;">
+      <h1 style="margin:0;">Korean Language Assistant — Appointments</h1>
+      <span id="rtBadge" class="badge">Realtime: —</span>
+    </div>
+    <p class="lead">Choose a time, then enter your name and CMU email. Once booked, that time becomes unavailable for that week.</p>
+    <div id="cfgWarn" style="display:none;margin:-8px 0 12px;color:#b91c1c;font-size:13px;">
+      Supabase keys not set yet — open <code>index.html</code> and replace
+      <code>SUPABASE_URL</code> and <code>SUPABASE_ANON_KEY</code> near the top.
+    </div>
+
+    <div class="card" style="margin-bottom:16px;">
+      <label for="weekSel">Week</label>
+      <select id="weekSel"></select>
+    </div>
+
+    <div class="row" id="daysRow"></div>
+
+    <div id="formCard" class="card hidden" style="margin-top:16px;">
+      <div class="flex" style="justify-content:space-between;">
+        <h3 style="margin:0;font-size:18px;">Confirm your booking</h3>
+        <button id="dismissBtn" class="btn">Dismiss</button>
+      </div>
+      <p class="muted" id="selSummary" style="margin-top:6px;"></p>
+      <div class="row2" style="margin-top:8px;">
+        <div>
+          <label>Name</label>
+          <input id="nameInp" placeholder="Jane Kim" />
+        </div>
+        <div>
+          <label>CMU Email</label>
+          <input id="emailInp" type="email" placeholder="andrewid@andrew.cmu.edu" />
+        </div>
+      </div>
+      <div class="flex" style="margin-top:10px;">
+        <button id="bookBtn" class="btn primary">Book this time</button>
+        <a id="icsLink" class="btn hidden" download>Add to Calendar (.ics)</a>
+        <span id="statusSpan" class="status"></span>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px;">
+      <div class="flex">
+        <input id="adminPass" type="password" placeholder="Admin password" style="max-width:220px;" />
+        <button id="adminBtn" class="btn">Admin sign in</button>
+        <span class="muted">(Optional, to view/export bookings; clearing requires a server function)</span>
+      </div>
+      <div id="adminPanel" class="hidden" style="margin-top:12px;">
+        <div class="flex" style="justify-content:space-between;">
+          <h3 style="margin:0;font-size:18px;">Admin — Bookings for <span id="wkISO"></span></h3>
+          <div class="flex">
+            <button id="csvBtn" class="btn">Export CSV</button>
+            <button id="clearWeekBtn" class="btn danger">Clear this week</button>
+            <button id="signOutBtn" class="btn">Sign out</button>
+          </div>
+        </div>
+        <div style="overflow:auto;margin-top:10px;">
+          <table>
+            <thead><tr><th>Day</th><th>Time</th><th>Name</th><th>Email</th><th>Actions</th></tr></thead>
+            <tbody id="adminTbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <footer>CMU — Korean Language Assistant Scheduler. Times in America/New_York.</footer>
+  </div>
+
+<script>
+// ======= CONFIG =======
+const ADMIN_PASS = "cmuKLA";
+
+// Supabase project (safe to expose the anon key in the client)
+const SUPABASE_URL = "https://xyjhpfgjjfeelfxkekrk.supabase.co"; // <-- paste yours
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh5amhwZmdqamZlZWxmeGtla3JrIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTc1NTM2MTksImV4cCI6MjA3MzEyOTYxOX0.EUDmdY4XhXm02VoVizYNv4fV2gznwqiEHClOufxx-J4"; // <-- paste yours
+
+// Table name
+const TABLE = "kla_bookings";
+
+// Static office hours configuration
+const RAW_SLOTS = {
+  Tue: [
+    "1:00 PM - 1:10 PM",
+    "1:15 PM - 1:25 PM",
+    "1:30 PM - 1:40 PM",
+    "1:45 PM - 1:55 PM",
+    "2:00 PM - 2:10 PM",
+  ],
+  Thu: [
+    "4:30 PM - 4:40 PM",
+    "4:45 PM - 4:55 PM",
+    "5:00 PM - 5:10 PM",
+    "5:15 PM - 5:25 PM",
+    "5:30 PM - 5:40 PM",
+    "5:45 PM - 5:55 PM",
+    "6:00 PM - 6:10 PM",
+    "6:15 PM - 6:25 PM",
+    "6:30 PM - 6:40 PM",
+  ],
+  Fri: [
+    "11:30 AM - 11:40 AM",
+    "11:45 AM - 11:55 AM",
+    "12:00 PM - 12:10 PM",
+    "12:15 PM - 12:25 PM",
+    "12:30 PM - 12:40 PM",
+    "12:45 PM - 12:55 PM",
+    "1:00 PM - 1:10 PM",
+    "2:00 PM - 2:10 PM",
+    "2:15 PM - 2:25 PM",
+    "2:30 PM - 2:40 PM",
+    "2:45 PM - 2:55 PM",
+  ],
+};
+const DAY_TO_ISO = { Tue: 2, Thu: 4, Fri: 5 }; // Mon=1...Sun=7
+
+// ======= HELPERS =======
+const $ = (id) => document.getElementById(id);
+function startOfISOWeek(date=new Date()){
+  const d=new Date(date);const day=(d.getDay()+6)%7;d.setDate(d.getDate()-day);d.setHours(0,0,0,0);return d;
+}
+function addDays(date,days){const d=new Date(date);d.setDate(d.getDate()+days);return d;}
+function fmtDate(d){return d.toLocaleDateString(undefined,{year:"numeric",month:"short",day:"numeric"});}
+function slotLabelToStartEnd(label){const [a,b]=label.split("-").map(x=>x.trim());return [a,b];}
+function toYYYYMMDD(date){const y=date.getUTCFullYear();const m=String(date.getUTCMonth()+1).padStart(2,"0");const d=String(date.getUTCDate()).padStart(2,"0");return `${y}${m}${d}`;}
+function toHHMMSS(date){const H=String(date.getUTCHours()).padStart(2,"0");const M=String(date.getUTCMinutes()).padStart(2,"0");const S=String(date.getUTCSeconds()).padStart(2,"0");return `${H}${M}${S}`;}
+function escapeICS(s){return s.replace(/\\/g,"\\\\").replace(/\n/g,"\\n").replace(/,/g,"\\,").replace(/;/g,"\\;");}
+function normalizeEmail(s){return String(s||'').toLowerCase().replace(/\s+/g,'').replace(/[.,;:]+$/,'');}
+function isCmuEmail(email){const em=normalizeEmail(email);return /@(?:[\w.-]+\.)?cmu\.edu$/.test(em);}
+function weekKey(d){
+  const dt=startOfISOWeek(d);const year=dt.getFullYear();
+  const temp=new Date(dt.getTime());temp.setHours(0,0,0,0);temp.setDate(temp.getDate()+3);
+  const firstThursday=new Date(temp.getFullYear(),0,4);
+  const diff=temp.getTime()-firstThursday.getTime();
+  const week=1+Math.round(diff/(7*24*60*60*1000));
+  return `${year}-W${String(week).padStart(2,"0")}`;
+}
+function combineLocalDateTime(weekStart, day, timeLabel){
+  const parts=timeLabel.trim().split(/\s+/);const hhmm=parts[0];const ap=(parts[1]||"AM").toUpperCase();
+  let [hh,mm]=hhmm.split(":").map(n=>parseInt(n,10));if(ap==="PM"&&hh!==12)hh+=12;if(ap==="AM"&&hh===12)hh=0;
+  const offset=DAY_TO_ISO[day]-1;const d=addDays(startOfISOWeek(weekStart),offset);const out=new Date(d);out.setHours(hh,mm,0,0);return out;
+}
+function isSlotInPast(selectedWeekStart, day, slotLabel){
+  const [startLabel]=slotLabelToStartEnd(slotLabel);const slotStart=combineLocalDateTime(selectedWeekStart,day,startLabel);
+  return slotStart.getTime()<Date.now();
+}
+function makeICS({title,description,start,end,location}){
+  const dtStartUTC=new Date(start.getTime()-start.getTimezoneOffset()*60000);
+  const dtEndUTC=new Date(end.getTime()-end.getTimezoneOffset()*60000);
+  const DTSTART=`${toYYYYMMDD(dtStartUTC)}T${toHHMMSS(dtStartUTC)}Z`;
+  const DTEND=`${toYYYYMMDD(dtEndUTC)}T${toHHMMSS(dtEndUTC)}Z`;
+  const ics=[
+    "BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//KLA Scheduler//CMU//EN","CALSCALE:GREGORIAN","METHOD:PUBLISH",
+    "BEGIN:VEVENT",`UID:${Date.now()}@kla.cmu.edu`,`DTSTAMP:${DTSTART}`,`DTSTART:${DTSTART}`,`DTEND:${DTEND}`,
+    `SUMMARY:${escapeICS(title)}`,location?`LOCATION:${escapeICS(location)}`:undefined,`DESCRIPTION:${escapeICS(description)}`,
+    "END:VEVENT","END:VCALENDAR"
+  ].filter(Boolean).join("\r\n");
+  return new Blob([ics],{type:"text/calendar;charset=utf-8"});
+}
+
+// ======= SUPABASE CLIENT =======
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// ======= STATE =======
+let selectedWeekStart=startOfISOWeek(new Date());
+let selected=null; // {day, slot}
+let weekBookings=[];
+let realtimeChannel = null;
+
+// ======= RENDER =======
+function renderWeekOptions(){
+  const sel=$("weekSel"); sel.innerHTML="";
+  const base=startOfISOWeek(new Date());
+  [0,1,2,3].forEach(k=>{
+    const ws=addDays(base,7*k);
+    const opt=document.createElement("option");
+    opt.value=ws.toISOString();
+    opt.textContent=`${fmtDate(ws)} (Mon) — ${fmtDate(addDays(ws,6))} (Sun)`;
+    if(k===0) opt.selected=true;
+    sel.appendChild(opt);
+  });
+}
+
+async function fetchWeekBookings(){
+  const iso = weekKey(selectedWeekStart);
+  const { data, error } = await supabase
+    .from(TABLE)
+    .select("day, slot, name, email, created_at")
+    .eq("week_iso", iso);
+  if (error) {
+    console.log("Supabase fetch error", error);
+    weekBookings = [];
+  } else {
+    weekBookings = data || [];
+  }
+}
+
+function bindRealtime(){
+  if (realtimeChannel) { supabase.removeChannel(realtimeChannel); realtimeChannel = null; }
+  const iso = weekKey(selectedWeekStart);
+  realtimeChannel = supabase.channel(`bookings-${iso}`)
+    .on('postgres_changes', { event: '*', schema: 'public', table: TABLE, filter: `week_iso=eq.${iso}` }, async (payload) => {
+      await fetchWeekBookings(); renderDays(true);
+    })
+    .subscribe((status) => {
+      const b = document.getElementById('rtBadge');
+      if (b) b.textContent = `Realtime: ${status}`;
+      console.log("Realtime:", status);
+    });
+}
+
+function renderDays(skipFetch){
+  const row=$("daysRow"); row.innerHTML="";
+  const currentISO=weekKey(selectedWeekStart);
+  $("wkISO").textContent=currentISO;
+
+  function draw(){
+    ["Tue","Thu","Fri"].forEach(day=>{
+      const card=document.createElement("div"); card.className="card";
+      const h=document.createElement("h2"); h.textContent=day; h.style.margin="0 0 12px"; h.style.fontSize="20px";
+      card.appendChild(h);
+      RAW_SLOTS[day].forEach(slot=>{
+        const booked=weekBookings.some(b=>b.day===day && b.slot===slot);
+        const past=isSlotInPast(selectedWeekStart,day,slot);
+        const btn=document.createElement("button"); btn.className="btn slot";
+        btn.disabled=booked || past;
+        btn.innerHTML=`<div class="flex" style="justify-content:space-between;width:100%;">
+          <span style="font-weight:600;">${slot}</span>
+          ${booked?'<span class="tag gray">Booked</span>':past?'<span class="tag muted">Past</span>':'<span class="muted">Select</span>'}
+        </div>`;
+        btn.onclick=()=>{
+          selected={day,slot};
+          $("formCard").classList.remove("hidden");
+          $("selSummary").textContent=`Week: ${fmtDate(selectedWeekStart)} (Mon) — ${fmtDate(addDays(selectedWeekStart,6))} (Sun) • Day: ${day} • Time: ${slot}`;
+          $("nameInp").value=""; $("emailInp").value=""; $("statusSpan").textContent=""; $("icsLink").classList.add("hidden");
+        };
+        card.appendChild(btn);
+      });
+      row.appendChild(card);
+    });
+
+    // Admin table
+    const tbody=$("adminTbody"); tbody.innerHTML="";
+    ["Tue","Thu","Fri"].forEach(day=>{
+      RAW_SLOTS[day].forEach(slot=>{
+        const info=weekBookings.find(b=>b.day===day && b.slot===slot);
+        const tr=document.createElement("tr");
+        tr.innerHTML=`<td>${day}</td><td>${slot}</td><td>${info?info.name:"—"}</td><td>${info?info.email:"—"}</td>
+          <td>${info?'<button class="btn danger btn-clear" data-day="'+day+'" data-slot="'+slot+'">Clear</button>':'<span class="muted">—</span>'}</td>`;
+        tbody.appendChild(tr);
+      });
+    });
+    tbody.querySelectorAll(".btn-clear").forEach(btn=>{
+      btn.addEventListener("click", async (e)=>{
+        const d=e.currentTarget.getAttribute("data-day");
+        const s=e.currentTarget.getAttribute("data-slot");
+        const iso=weekKey(selectedWeekStart);
+        const passVal = $("adminPass").value || "";
+        if (!passVal) { alert("Enter admin password first."); return; }
+        if (!confirm(`Clear booking for ${d} • ${s}?`)) return;
+        try {
+          const resp = await fetch("/.netlify/functions/clear-slot", {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "x-admin-pass": passVal },
+            body: JSON.stringify({ week_iso: iso, day: d, slot: s })
+          });
+          if (resp.ok) {
+            await fetchWeekBookings(); renderDays(true);
+            alert("Cleared.");
+          } else {
+            const text = await resp.text();
+            alert("Failed to clear: " + text);
+          }
+        } catch (err) {
+          alert("Network error: " + err);
+        }
+      });
+    });
+    });
+  }
+
+  if (skipFetch) { draw(); return; }
+  fetchWeekBookings().then(draw);
+}
+
+// ======= ACTIONS =======
+$("weekSel").addEventListener("change",(e)=>{
+  selectedWeekStart=new Date(e.target.value); selected=null; $("formCard").classList.add("hidden"); renderDays(); bindRealtime();
+});
+$("dismissBtn").addEventListener("click",()=>{$("formCard").classList.add("hidden");});
+
+$("bookBtn").addEventListener("click", async ()=>{
+  if(!selected) return;
+  const nm=$("nameInp").value.trim();
+  let em=$("emailInp").value; em = normalizeEmail(em);
+  if(!nm){$("statusSpan").textContent="Enter your name.";return;}
+  if(!isCmuEmail(em)){$("statusSpan").textContent="Use an @andrew.cmu.edu email address.";return;}
+
+  const iso=weekKey(selectedWeekStart);
+
+  // Prevent double-booking (DB constraint also enforces this)
+  const already=weekBookings.find(b=>b.email.toLowerCase()===em.toLowerCase());
+  if(already){$("statusSpan").textContent="You already booked a slot this week.";return;}
+  const taken=weekBookings.find(b=>b.day===selected.day && b.slot===selected.slot);
+  if(taken){$("statusSpan").textContent="This slot was just taken.";await fetchWeekBookings(); renderDays(true); return;}
+
+  // Write to Supabase
+  const rec={
+    week_iso: iso,
+    week_start_iso: selectedWeekStart.toISOString().slice(0,10),
+    day: selected.day, slot: selected.slot,
+    name: nm, email: em
+  };
+  const { error } = await supabase.from(TABLE).insert(rec);
+  if (error) {
+    const msg = String(error.message||"").toLowerCase();
+    if (msg.includes("unique")) {
+      $("statusSpan").textContent = "Already booked / slot taken.";
+    } else if (msg.includes("rls")) {
+      $("statusSpan").textContent = "Booking blocked by database policy.";
+    } else {
+      $("statusSpan").textContent = "Booking failed. Try again.";
+    }
+    console.log("Supabase insert error", error);
+    return;
+  }
+
+  // Refresh cache
+  await fetchWeekBookings();
+  renderDays(true);
+
+  // ICS
+  const [startLabel,endLabel]=slotLabelToStartEnd(selected.slot);
+  const apptStart=combineLocalDateTime(selectedWeekStart,selected.day,startLabel);
+  const apptEnd=combineLocalDateTime(selectedWeekStart,selected.day,endLabel);
+  const blob=makeICS({
+    title:"Korean Language Assistant Appointment",
+    description:`Name: ${nm}\nEmail: ${em}\nDay: ${selected.day}\nTime: ${selected.slot}`,
+    start: apptStart, end: apptEnd, location:"CMU — Location TBA"
+  });
+  const url=URL.createObjectURL(blob);
+  const link=$("icsLink"); link.href=url; link.download=`KLA_${iso}_${selected.day}_${selected.slot.replace(/\s+/g,'')}.ics`;
+  link.classList.remove("hidden");
+
+  $("statusSpan").textContent="Booked! Your slot is reserved. A confirmation email will arrive shortly.";
+
+  // Send confirmation email to the student via EmailJS (non-blocking)
+  try {
+    if (window.emailjs && EMAILJS_PUBLIC_KEY && !/YOUR_EMAILJS_PUBLIC_KEY/.test(EMAILJS_PUBLIC_KEY)) {
+      const weekStartText = `${fmtDate(selectedWeekStart)} (Mon)`;
+      const weekEndText = `${fmtDate(addDays(selectedWeekStart, 6))} (Sun)`;
+      const siteUrl = window.location.origin + window.location.pathname;
+      const templateParams = {
+        to_email: em,
+        to_name: nm,
+        week_iso: iso,
+        week_range: `${weekStartText} — ${weekEndText}`,
+        day: selected.day,
+        slot: selected.slot,
+        site_url: siteUrl
+      };
+      emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, templateParams)
+        .then(() => console.log("EmailJS: student confirmation sent"),
+              (err) => console.log("EmailJS: send error", err));
+    } else {
+      console.log("EmailJS not configured yet (set EMAILJS_* constants).");
+    }
+  } catch (e) {
+    console.log("EmailJS send failed:", e);
+  }
+});
+
+$("adminBtn").addEventListener("click",()=>{
+  const ok=$("adminPass").value===ADMIN_PASS;
+  if(ok){$("adminPanel").classList.remove("hidden");renderDays(); bindRealtime();} else {alert("Wrong password.");}
+});
+$("signOutBtn").addEventListener("click",()=>{$("adminPanel").classList.add("hidden");$("adminPass").value=""; if (realtimeChannel) { supabase.removeChannel(realtimeChannel); realtimeChannel=null; document.getElementById('rtBadge').textContent='Realtime: —'; }});
+$("csvBtn").addEventListener("click", async ()=>{
+  const iso=weekKey(selectedWeekStart);
+  await fetchWeekBookings();
+  const rows=weekBookings.map(b=>[iso, selectedWeekStart.toISOString().slice(0,10), b.day, b.slot, b.name, b.email, new Date(b.created_at||Date.now()).toISOString()]);
+  const header=["weekISO","weekStartISO","day","slot","name","email","createdAtISO"];
+  const csv=[header,...rows].map(r=>r.map(x=>`"${String(x).replaceAll('"','""')}"`).join(",")).join("\n");
+  const blob=new Blob([csv],{type:"text/csv;charset=utf-8"});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a");a.href=url;a.download=`${iso}-kla-bookings.csv`;a.click();
+});
+$("clearWeekBtn").addEventListener("click", async ()=>{
+  /* clear-week wired by function; not used here */
+});
+
+// ======= INIT =======
+(function checkKeys(){
+  const bad = SUPABASE_URL.includes("YOUR-PROJECT-REF") || SUPABASE_ANON_KEY.includes("YOUR_PUBLIC_ANON_KEY");
+  if (bad) { const el = document.getElementById('cfgWarn'); if (el) el.style.display='block'; }
+})();
+renderWeekOptions();
+renderDays();
+bindRealtime();
+</script>
+</body>
+</html>
