@@ -345,7 +345,7 @@ function renderDays(skipFetch){
           const d = e.currentTarget.getAttribute("data-day");
           const s = e.currentTarget.getAttribute("data-slot");
           const iso = weekKey(selectedWeekStart);
-          const passVal = $("adminPass").value || "";
+          const passVal = ($("adminPass").value || "").trim();
           if (!passVal){ alert("Enter admin password first."); return; }
           if (!confirm(`Clear booking for ${d} • ${s}?`)) return;
 
