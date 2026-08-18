@@ -208,8 +208,8 @@ function isSlotInPast(selectedWeekStart, day, slotLabel){
   return slotStart.getTime()<Date.now();
 }
 function makeICS({title,description,start,end,location}){
-  const dtStartUTC=new Date(start.getTime()-start.getTimezoneOffset()*60000);
-  const dtEndUTC=new Date(end.getTime()-end.getTimezoneOffset()*60000);
+  const dtStartUTC=new Date(start.getTime());
+  const dtEndUTC=new Date(end.getTime());
   const DTSTART=`${toYYYYMMDD(dtStartUTC)}T${toHHMMSS(dtStartUTC)}Z`;
   const DTEND=`${toYYYYMMDD(dtEndUTC)}T${toHHMMSS(dtEndUTC)}Z`;
   const ics=[
