@@ -222,7 +222,7 @@ function makeICS({title,description,start,end,location}){
 }
 
 // ======= SUPABASE CLIENT =======
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 // ======= STATE =======
 let selectedWeekStart=startOfISOWeek(new Date());
@@ -246,7 +246,7 @@ function renderWeekOptions(){
 
 async function fetchWeekBookings(){
   const iso = weekKey(selectedWeekStart);
-  const { data, error } = await supabase
+  const { data, error } = await supabaseClient
     .from(TABLE)
     .select("day, slot, name, email, created_at")
     .eq("week_iso", iso);
@@ -259,9 +259,9 @@ async function fetchWeekBookings(){
 }
 
 function bindRealtime(){
-  if (realtimeChannel) { supabase.removeChannel(realtimeChannel); realtimeChannel = null; }
+  if (realtimeChannel) { supabaseClient.removeChannel(realtimeChannel); realtimeChannel = null; }
   const iso = weekKey(selectedWeekStart);
-  realtimeChannel = supabase.channel(`bookings-${iso}`)
+  realtimeChannel = supabaseClient.channel(`bookings-${iso}`)
     .on('postgres_changes', { event: '*', schema: 'public', table: TABLE, filter: `week_iso=eq.${iso}` }, async (payload) => {
       await fetchWeekBookings(); renderDays(true);
     })
@@ -396,7 +396,7 @@ $("bookBtn").addEventListener("click", async ()=>{
     day: selected.day, slot: selected.slot,
     name: nm, email: em
   };
-  const { error } = await supabase.from(TABLE).insert(rec);
+  const { error } = await supabaseClient.from(TABLE).insert(rec);
   if (error) {
     const msg = String(error.message||"").toLowerCase();
     if (msg.includes("unique")) {
@@ -459,7 +459,7 @@ $("adminBtn").addEventListener("click",()=>{
   const ok=$("adminPass").value===ADMIN_PASS;
   if(ok){$("adminPanel").classList.remove("hidden");renderDays(); bindRealtime();} else {alert("Wrong password.");}
 });
-$("signOutBtn").addEventListener("click",()=>{$("adminPanel").classList.add("hidden");$("adminPass").value=""; if (realtimeChannel) { supabase.removeChannel(realtimeChannel); realtimeChannel=null; document.getElementById('rtBadge').textContent='Realtime: —'; }});
+$("signOutBtn").addEventListener("click",()=>{$("adminPanel").classList.add("hidden");$("adminPass").value=""; if (realtimeChannel) { supabaseClient.removeChannel(realtimeChannel); realtimeChannel=null; document.getElementById('rtBadge').textContent='Realtime: —'; }});
 $("csvBtn").addEventListener("click", async ()=>{
   const iso=weekKey(selectedWeekStart);
   await fetchWeekBookings();
